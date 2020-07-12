@@ -1,67 +1,45 @@
-#define REV1_0
-
-#define DEBUG
-
-// Number of inputs, external and internal
-#ifdef REV1_1
-#define NUMBER_OF_INPUTS 4
-#else
-#define NUMBER_OF_INPUTS 3
-#endif
+//#define DEBUG
 
 // Timeout for dimming LCD in milliseconds
-#define INACTIVITY_TIMEOUT 20 * 1000
-
-// SPI Chip-Select pin for digital pot for LCD backlight dimming
-#define POT_CS_PIN 10
+// Doesn't work super well for OLEDs, but whatever.
+#define INACTIVITY_TIMEOUT 5 * 1000
 
 // Button inputs
-#ifdef REV1_1
-// Pin, analog level min, analog level max, callback()
-#define BTN_INPUT_SEL   {A6, 650,  800, &select_next_input}
-#define BTN_TOGGLE_MUTE {A6, 820, 1023, &toggle_mute}
-#else
 // Pin, callback()
-#define BTN_INPUT_SEL   {4, &select_next_input}
-#define BTN_TOGGLE_MUTE {3, &toggle_mute}
-
-#endif
-
-// Audio outpout relay trigger pin (mute)
-#ifdef REV1_1
-#define OUTPUT_PIN 2
-#else
-#define OUTPUT_PIN 8
-#endif
-
-#ifdef REV1_1
-#else
-#endif
+#define BTN_INPUT_SEL   {3, &select_next_input}
+#define BTN_TOGGLE_MUTE {2, &toggle_mute}
 
 // Audio input relay output trigger pins and descriptions
 // of the inputs for the LCD
 //
 // Inputs 1...N
-#ifdef REV1_1
-#define INPUT_RELAY_PINS { 3, 4, 5, 6 };
-#define INPUT_DESCRIPTIONS { "Desktop PC", "Laptop", "AUX", "Bluetooth" }
-#else
-#define INPUT_RELAY_PINS { 5, 6, 7 };
-#define INPUT_DESCRIPTIONS { "Desktop PC", "Laptop", "AUX" }
-#endif
+#define INPUT_RELAY_PINS   { 5, 6, 7, 8 };
+#define INPUT_DESCRIPTIONS { "Desktop", "Laptop", "AUX", "Bluetooth" }
 
-// Digital output trigger pin for BT module power
-#ifdef REV1_1
-#define BT_PWR_PIN 7
-#endif
+// Mute/output relay
+#define OUTPUT_PIN 4
+
+// Pin for enabling the relay LEDs.
+// Comment out to disable LEDs.
+#define LED_PIN 9
 
 #include <Arduino.h>
 #include <SPI.h>
 #include <EEPROM.h>
 #include <Wire.h>
-#include <FaBoLCD_PCF8574.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
-FaBoLCD_PCF8574 lcd(0x27);
+#define SCREEN_WIDTH    128 // OLED display width, in pixels
+#define SCREEN_HEIGHT    64 // OLED display height, in pixels
+#define SCREEN_TOP_BAR   16
+#define LCD_INVERT        0
+#define FONT_WIDTH        5
+#define FONT_HEIGHT       7
+#define MUTE_TEXT_TOP SCREEN_HEIGHT - SCREEN_TOP_BAR
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+Adafruit_SSD1306 lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // Required to forward-declare these for use with 'buttons'
 void select_next_input();
@@ -81,55 +59,56 @@ struct data_store {
 struct button {
   bool pressed = false;
   bool muted = false;
-
   unsigned long m_debounce_millis;
-  
+
   int pin;
   int a_val_min;
   int a_val_max;
-  int m_debounce_delay;
   void (*fn_pressed)() = NULL;
   void (*fn_released)() = NULL;
+  int m_debounce_delay;
   bool analog_mode = false;
 
   // Analog resistor-based input buttons
+  // Analog resistor-based input buttons
   button(int input_pin, int aval_min, int aval_max, void(*fnPressed)(void) = NULL, void(*fnReleased)(void) = NULL, int debounce_delay = 25):
-    pin(input_pin), fn_pressed(fnPressed), fn_released(fnReleased), a_val_min(aval_min), a_val_max(aval_max), analog_mode(true), m_debounce_delay(debounce_delay)
-  {}
+    pin(input_pin), a_val_min(aval_min), a_val_max(aval_max), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay), analog_mode(true)
+  {
+    pinMode(input_pin, INPUT_PULLUP);
+  }
 
   // Digital input buttons
   button(int input_pin, void(*fnPressed)(void) = NULL, void(*fnReleased)(void) = NULL, int debounce_delay = 25):
     pin(input_pin), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay)
-  {}
+  {
+    pinMode(input_pin, INPUT_PULLUP);
+  }
 
   void check() {
-    bool btn_state;
+    //bool btn_state;
 
     if (analog_mode) {
-      auto aval = analogRead(pin);
-      btn_state = aval >= a_val_min && aval <= a_val_max;
+      //auto aval = analogRead(pin);
+      //btn_state = aval >= a_val_min && aval <= a_val_max;
     } else {
-      btn_state = digitalRead(pin) == HIGH;
-    }
+      if (!digitalRead(pin)) {
+        state_changed(true);
 
-    if (btn_state && !pressed) {
-      state_changed(true);
-    } else if (!btn_state && pressed) {
-      state_changed(false);
+        while (!digitalRead(pin)) {}
+
+        state_changed(false);
+      }
     }
   }
 
   void state_changed(bool state) {
     if (m_debounce_millis > 0 && m_debounce_millis + m_debounce_delay > millis()) {
       m_debounce_millis = 0;
-#ifdef DEBUG
-      Serial.print("DEBOUNCE: Button on pin "); 
-      Serial.println(pin); 
-#endif
       return;
     }
 
     m_debounce_millis = millis();
+    
     pressed = state;
 
     if (pressed) {
@@ -165,25 +144,40 @@ button buttons[] = {
 
 const char *inputDescriptions[] = INPUT_DESCRIPTIONS;
 const int inputRelays[] = INPUT_RELAY_PINS;
-bool bluetoothPowerState = false;
 data_store settings;
 
 unsigned long last_active_millis = 0;
 bool is_active = false;
+int number_of_inputs = sizeof(inputRelays) / sizeof(inputRelays[0]);
+
+/**
+ * Center text horizontally and vertically within the bounds of a given
+ * box of rows.
+ */
+void lcd_center_text(Adafruit_SSD1306 &lcd, const char str[], int y = 0, int height = SCREEN_HEIGHT, int color = SSD1306_WHITE, int fsize_x = 1, int fsize_y = 0) {
+  if (fsize_y < 1) {
+    fsize_y = fsize_x;
+  }
+
+  auto offset_x = SCREEN_WIDTH / 2 - ((strlen(str) + 1) * (FONT_WIDTH * fsize_x) / 2);
+  auto offset_y = (height / 2 - (FONT_HEIGHT * fsize_y) / 2);
+
+  lcd.setCursor(offset_x, y + offset_y);
+  lcd.setTextColor(color);
+  lcd.setTextSize(fsize_x, fsize_y);
+  lcd.print(str);
+}
 
 void setup() {
-  pinMode(POT_CS_PIN, OUTPUT);
-  digitalWrite(POT_CS_PIN, HIGH);
-
-  for (auto i = 0; i < NUMBER_OF_INPUTS; i++) {
+  for (auto i = 0; i < number_of_inputs; i++) {
     pinMode(inputRelays[i], OUTPUT);
   }
 
   pinMode(OUTPUT_PIN, OUTPUT);
-
-#ifdef BT_PWR_PIN
-  pinMode(BT_PWR_PIN, OUTPUT);
+#ifdef LED_PIN
+  pinMode(LED_PIN, OUTPUT);
 #endif
+  digitalWrite(LED_PIN, HIGH);
 
 #ifdef DEBUG
   Serial.begin(115200);
@@ -191,16 +185,46 @@ void setup() {
 
   SPI.begin();
 
-  // Set up the LCD's number of columns and rows
-  lcd.begin(16, 2);
-  lcd.print(" Audio Switcher ");
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if(!lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+
+  // Dim the contrast as much a possible.
+  lcd.ssd1306_command(SSD1306_SETCONTRAST);
+  lcd.ssd1306_command(0);
+  lcd.invertDisplay(LCD_INVERT != 0);
+  lcd.cp437(true); // Use full 256 char 'Code Page 437' font
+  lcd.setRotation(90);
+
+  // Show initial display buffer contents on the screen --
+  // the library initializes this with an Adafruit splash screen.
+  lcd.clearDisplay();
+
+  auto half_height = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2;
+
+  lcd_center_text(lcd, "Audio", 0, half_height, SSD1306_WHITE, 2);
+  lcd_center_text(lcd, "Switcher", half_height, half_height, SSD1306_WHITE, 2);
+
+  lcd.display();
+  delay(1000);
 
   read_eeprom();
   switch_input(settings.selected_input);
 
   has_activity();
+}
 
-  delay(1000);
+/**
+ * Get the description of an input, if available
+ */
+const char *get_input_desc(unsigned int input) {
+  if (input >= (sizeof(inputDescriptions) / sizeof(inputDescriptions[0]))) {
+    return "(no desc)";
+  }
+
+  return inputDescriptions[input];
 }
 
 /**
@@ -209,31 +233,8 @@ void setup() {
 void has_activity() {
   update_display();
 
-#ifdef DEBUG
-  for (auto i = 0; i < NUMBER_OF_INPUTS; i++) {
-    Serial.print("Input ");
-    Serial.print(i+1);
-    Serial.print(" = ");
-
-    if (digitalRead(inputRelays[i])) {
-      Serial.println("On");
-    } else {
-      Serial.println("Off");
-    }
-  }
-
-  Serial.print("Output = ");
-
-  if (digitalRead(OUTPUT_PIN)) {
-    Serial.println("On");
-  } else {
-    Serial.println("Off");
-  }
-
-#endif
-
   if (!is_active) {
-    fade_backlight(1);
+    update_display();
   }
 
   is_active = true;
@@ -245,50 +246,52 @@ void has_activity() {
  */
 void inactive() {
   is_active = false;
-  fade_backlight(-1);
+
+  lcd.ssd1306_command(SSD1306_SETCONTRAST);
+  lcd.ssd1306_command(0);
+
+  lcd_dim();
+  lcd.display();
 }
 
-/**
- * Fade backlight of LCD in or out
- * 'step' > 0 = fade in
- * 'step' < 0 = fade out
- */
-void fade_backlight(int step) {
-  const auto neg = step < 1 ? 127 : 0;
-
-  digitalWrite(POT_CS_PIN, LOW);
-  // Values below 64 isn't very perceptive
-  for (auto i = 64; i < 127; i++) {
-    const auto brightness = 127 - abs(neg - i);
-    SPI.transfer(0x00);
-    SPI.transfer(brightness);
-    delay(4);
+void dither_box(int x1, int y1, int x2, int y2, int color) {
+  for (auto y = y1; y < y2; y += 2) {
+    lcd.drawLine(x1, y, x2, y, color);
   }
-  digitalWrite(POT_CS_PIN, HIGH);
+  for (auto x = x1; x < x2; x += 2) {
+    lcd.drawLine(x, y1, x, y2, color);
+  }
+}
+
+void lcd_dim() {
+  dither_box(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+  dither_box(1, 1, SCREEN_WIDTH - 2, SCREEN_HEIGHT - SCREEN_TOP_BAR - 2, SSD1306_BLACK);
 }
 
 /**
- * Update the LCD display
+ * Update display
  */
 void update_display() {
-  char buf[17];
+  lcd.clearDisplay();
 
-  auto num_chars = sprintf(buf, "%d: %s", settings.selected_input + 1, inputDescriptions[settings.selected_input]);
-  // Pad with spaces to clear previous line of longer strings
-  memset(buf + num_chars, ' ', sizeof(buf) - num_chars);
-
-  lcd.setCursor(0, 0);
-  lcd.print(buf);
-
-  lcd.setCursor(0, 1);
-
+  // Mute state
   if (settings.muted) {
-    lcd.print("  --- Mute ---  ");
+    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_WHITE);
+    lcd_center_text(lcd, "Mute", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_BLACK, 2);
   } else {
-    lcd.print("                ");
+    char buf[20];
+    sprintf(buf, "Input #%d", settings.selected_input + 1);
+    lcd_center_text(lcd, buf, MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_WHITE, 2);
   }
-}
 
+  auto desc = get_input_desc(settings.selected_input);
+  // Adjust width of font depending on the length of the string.
+  auto fx = strlen(desc) < 10 ? 2 : 1;
+  lcd.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, SSD1306_WHITE);
+  lcd_center_text(lcd, desc, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, SSD1306_WHITE, fx, 4);
+
+  lcd.display();
+}
 /**
  * Save settings to EEPROM
  * This isn't really super great, as it has a number of cycles
@@ -306,39 +309,35 @@ void read_eeprom() {
 
   settings.muted = bool(settings.muted);
 
-  if (settings.selected_input >= NUMBER_OF_INPUTS) {
+  if (settings.selected_input >= number_of_inputs) {
     settings.selected_input = 0;
   }
 }
 
 /**
+ * Set relay state of the given pin
+ */
+void toggleRelay(int pin, int state) {
+  digitalWrite(pin, state);
+}
+
+/**
  * Switch input from 'settings.selected_input' to 'input'
- * Will also turn power on/off to the BT Audio Module when
- * relevant.
  */
 void switch_input(int input) {
   // Disable output
   if (!settings.muted) {
     setMute(true);
+    delay(20);
   }
 
-  digitalWrite(inputRelays[settings.selected_input], LOW);
-  digitalWrite(inputRelays[input], HIGH);
-
-#ifdef BT_PWR_PIN
-  // BT input is always the last input
-  if (input == (NUMBER_OF_INPUTS - 1)) {
-    digitalWrite(BT_PWR_PIN, HIGH);
-    bluetoothPowerState = true;
-  } else if (bluetoothPowerState) {
-    digitalWrite(BT_PWR_PIN, LOW);
-    bluetoothPowerState = false;
-  }
-#endif
+  toggleRelay(inputRelays[settings.selected_input], LOW);
+  delay(20);
+  toggleRelay(inputRelays[input], HIGH);
 
   if (!settings.muted) {
     // Re-enable output
-    //delay(25);
+    delay(20);
     setMute(false);
   }
 
@@ -350,7 +349,7 @@ void switch_input(int input) {
  * Set muted state
  */
 void setMute(bool muted) {
-  digitalWrite(OUTPUT_PIN, muted ? LOW : HIGH);
+  toggleRelay(OUTPUT_PIN, muted ? LOW : HIGH);
 }
 
 /**
@@ -369,7 +368,7 @@ void toggle_mute() {
 void select_next_input() {
   auto new_input = settings.selected_input + 1;
 
-  if (new_input == NUMBER_OF_INPUTS) {
+  if (new_input == number_of_inputs) {
     new_input = 0;
   }
 
