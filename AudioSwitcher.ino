@@ -1,4 +1,4 @@
-//#define DEBUG
+#define DEBUG
 
 // Timeout for dimming LCD in milliseconds
 // Doesn't work super well for OLEDs, but whatever.
@@ -6,22 +6,36 @@
 
 // Button inputs
 // Pin, callback()
-#define BTN_INPUT_SEL   {3, &select_next_input}
-#define BTN_TOGGLE_MUTE {2, &toggle_mute}
+#define BTN_INPUT_SEL \
+  { 3, &select_next_input }
+#define BTN_TOGGLE_MUTE \
+  { 2, &toggle_mute }
+#define BTN_TOGGLE_LEDS \
+  { 10, &toggle_leds }
+#define NUM_BUTTONS 3
 
 // Audio input relay output trigger pins and descriptions
 // of the inputs for the LCD
 //
 // Inputs 1...N
-#define INPUT_RELAY_PINS   { 5, 6, 7, 8 };
-#define INPUT_DESCRIPTIONS { "Desktop", "Laptop", "AUX", "Bluetooth" }
+#define RELAY_INPUT_1_PIN 6
+#define RELAY_INPUT_2_PIN 7
+#define RELAY_INPUT_3_PIN 8
+#define RELAY_INPUT_4_PIN 9
+#define INPUT_RELAY_PINS \
+  { RELAY_INPUT_1_PIN, RELAY_INPUT_2_PIN, RELAY_INPUT_3_PIN };
+#define INPUT_DESCRIPTIONS \
+  { "Spotify", "Bluetooth", "Aux" }
+
+// Delay, in ms, between switching inputs
+#define SWITCH_DELAY 250
 
 // Mute/output relay
-#define OUTPUT_PIN 4
+#define OUTPUT_PIN 5
 
 // Pin for enabling the relay LEDs.
 // Comment out to disable LEDs.
-#define LED_PIN 9
+#define LED_PIN 4
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -30,12 +44,12 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define SCREEN_WIDTH    128 // OLED display width, in pixels
-#define SCREEN_HEIGHT    64 // OLED display height, in pixels
-#define SCREEN_TOP_BAR   16
-#define LCD_INVERT        0
-#define FONT_WIDTH        5
-#define FONT_HEIGHT       7
+#define SCREEN_WIDTH 128  // OLED display width, in pixels
+#define SCREEN_HEIGHT 64  // OLED display height, in pixels
+#define SCREEN_TOP_BAR 16
+#define LCD_INVERT 0
+#define FONT_WIDTH 5
+#define FONT_HEIGHT 7
 #define MUTE_TEXT_TOP SCREEN_HEIGHT - SCREEN_TOP_BAR
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
@@ -44,10 +58,12 @@ Adafruit_SSD1306 lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 // Required to forward-declare these for use with 'buttons'
 void select_next_input();
 void toggle_mute();
+void toggle_leds();
 
 struct data_store {
   byte selected_input = 0;
   bool muted = false;
+  bool leds = false;
 };
 
 /**
@@ -57,8 +73,7 @@ struct data_store {
  * a single digital pin, HIGH being pressed.
  */
 struct button {
-  bool pressed = false;
-  bool muted = false;
+  bool m_state = false;
   unsigned long m_debounce_millis;
 
   int pin;
@@ -70,35 +85,45 @@ struct button {
   bool analog_mode = false;
 
   // Analog resistor-based input buttons
-  // Analog resistor-based input buttons
-  button(int input_pin, int aval_min, int aval_max, void(*fnPressed)(void) = NULL, void(*fnReleased)(void) = NULL, int debounce_delay = 25):
-    pin(input_pin), a_val_min(aval_min), a_val_max(aval_max), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay), analog_mode(true)
-  {
-    pinMode(input_pin, INPUT_PULLUP);
-  }
+  button(int input_pin, int aval_min, int aval_max, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, int debounce_delay = 100)
+    : pin(input_pin), a_val_min(aval_min), a_val_max(aval_max), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay), analog_mode(true) {}
 
   // Digital input buttons
-  button(int input_pin, void(*fnPressed)(void) = NULL, void(*fnReleased)(void) = NULL, int debounce_delay = 25):
-    pin(input_pin), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay)
-  {
+  button(int input_pin, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, int debounce_delay = 100)
+    : pin(input_pin), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay) {
+    // Using the internal pullup means we can use only one grounding resistor
+    // for all the buttons, instead of one per button/pin.
     pinMode(input_pin, INPUT_PULLUP);
   }
 
-  void check() {
-    //bool btn_state;
-
-    if (analog_mode) {
-      //auto aval = analogRead(pin);
-      //btn_state = aval >= a_val_min && aval <= a_val_max;
-    } else {
-      if (!digitalRead(pin)) {
+  /**
+   * Check state of the button
+   */
+  bool check() {
+    if (!m_state) {
+      if (check_state()) {
         state_changed(true);
-
-        while (!digitalRead(pin)) {}
-
+        return true;
+      }
+    } else {
+      if (!check_state()) {
         state_changed(false);
       }
     }
+
+    return false;
+  }
+
+  /**
+   * Check the state of the pin depending on the input mode
+   */
+  bool check_state() {
+    if (analog_mode) {
+      auto aval = analogRead(pin);
+      return aval >= a_val_min && aval <= a_val_max;
+    }
+
+    return digitalRead(pin) == LOW;
   }
 
   void state_changed(bool state) {
@@ -108,10 +133,10 @@ struct button {
     }
 
     m_debounce_millis = millis();
-    
-    pressed = state;
 
-    if (pressed) {
+    m_state = state;
+
+    if (m_state) {
       if (fn_pressed != NULL) {
         (*fn_pressed)();
       }
@@ -119,7 +144,7 @@ struct button {
 #ifdef DEBUG
       Serial.print("PRESS: ");
 #endif
-} else {
+    } else {
       if (fn_released != NULL) {
         (*fn_released)();
       }
@@ -129,9 +154,8 @@ struct button {
     }
 
 #ifdef DEBUG
-    Serial.print("PRESS: ");
-    Serial.print("Button on pin "); 
-    Serial.println(pin); 
+    Serial.print("Button on pin ");
+    Serial.println(pin);
 #endif
   }
 };
@@ -139,7 +163,8 @@ struct button {
 // Define the physical input buttons
 button buttons[] = {
   BTN_INPUT_SEL,
-  BTN_TOGGLE_MUTE
+  BTN_TOGGLE_MUTE,
+  BTN_TOGGLE_LEDS
 };
 
 const char *inputDescriptions[] = INPUT_DESCRIPTIONS;
@@ -147,7 +172,10 @@ const int inputRelays[] = INPUT_RELAY_PINS;
 data_store settings;
 
 unsigned long last_active_millis = 0;
+unsigned long timer1 = 0;
+
 bool is_active = false;
+bool is_switching_output = false;
 int number_of_inputs = sizeof(inputRelays) / sizeof(inputRelays[0]);
 
 /**
@@ -174,10 +202,11 @@ void setup() {
   }
 
   pinMode(OUTPUT_PIN, OUTPUT);
+
 #ifdef LED_PIN
   pinMode(LED_PIN, OUTPUT);
+  //digitalWrite(LED_PIN, HIGH);
 #endif
-  digitalWrite(LED_PIN, HIGH);
 
 #ifdef DEBUG
   Serial.begin(115200);
@@ -186,16 +215,17 @@ void setup() {
   SPI.begin();
 
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if(!lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3C for 128x32
+  if (!lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  // Address 0x3C for 128x32
     Serial.println(F("SSD1306 allocation failed"));
-    for(;;); // Don't proceed, loop forever
+    for (;;)
+      ;  // Don't proceed, loop forever
   }
 
   // Dim the contrast as much a possible.
   lcd.ssd1306_command(SSD1306_SETCONTRAST);
   lcd.ssd1306_command(0);
   lcd.invertDisplay(LCD_INVERT != 0);
-  lcd.cp437(true); // Use full 256 char 'Code Page 437' font
+  lcd.cp437(true);  // Use full 256 char 'Code Page 437' font
   lcd.setRotation(90);
 
   // Show initial display buffer contents on the screen --
@@ -203,15 +233,15 @@ void setup() {
   lcd.clearDisplay();
 
   auto half_height = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2;
-
   lcd_center_text(lcd, "Audio", 0, half_height, SSD1306_WHITE, 2);
   lcd_center_text(lcd, "Switcher", half_height, half_height, SSD1306_WHITE, 2);
 
   lcd.display();
   delay(1000);
 
-  read_eeprom();
+  //read_eeprom();
   switch_input(settings.selected_input);
+  setLEDs(settings.leds);
 
   has_activity();
 }
@@ -268,22 +298,30 @@ void lcd_dim() {
   dither_box(1, 1, SCREEN_WIDTH - 2, SCREEN_HEIGHT - SCREEN_TOP_BAR - 2, SSD1306_BLACK);
 }
 
+void update_display_active_region() {
+  // Mute state
+  if (settings.muted) {
+    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_WHITE);
+
+    lcd_center_text(lcd, "Mute", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_BLACK, 2);
+  } else {
+    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+
+    if (is_switching_output) {
+      lcd_center_text(lcd, "Wait", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_WHITE, 2);
+    } else {
+      lcd_center_text(lcd, "Active", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_WHITE, 2);
+    }
+  }
+}
+
 /**
  * Update display
  */
 void update_display() {
   lcd.clearDisplay();
 
-  // Mute state
-  if (settings.muted) {
-    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_WHITE);
-    lcd_center_text(lcd, "Mute", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_BLACK, 2);
-  } else {
-    char buf[20];
-    sprintf(buf, "Input #%d", settings.selected_input + 1);
-    lcd_center_text(lcd, buf, MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_WHITE, 2);
-  }
-
+  update_display_active_region();
   auto desc = get_input_desc(settings.selected_input);
   // Adjust width of font depending on the length of the string.
   auto fx = strlen(desc) < 10 ? 2 : 1;
@@ -308,6 +346,7 @@ void read_eeprom() {
   EEPROM.get(0, settings);
 
   settings.muted = bool(settings.muted);
+  settings.leds = bool(settings.leds);
 
   if (settings.selected_input >= number_of_inputs) {
     settings.selected_input = 0;
@@ -331,15 +370,20 @@ void switch_input(int input) {
     delay(20);
   }
 
+  is_switching_output = true;
+  update_display();
+
   toggleRelay(inputRelays[settings.selected_input], LOW);
   delay(20);
   toggleRelay(inputRelays[input], HIGH);
 
   if (!settings.muted) {
     // Re-enable output
-    delay(20);
+    delay(SWITCH_DELAY);
     setMute(false);
   }
+
+  is_switching_output = false;
 
   settings.selected_input = input;
   save_eeprom();
@@ -353,6 +397,13 @@ void setMute(bool muted) {
 }
 
 /**
+ * Set indicator LED state
+ */
+void setLEDs(bool state) {
+  toggleRelay(LED_PIN, state ? LOW : HIGH);
+}
+
+/**
  * Toggle muting of the output relay
  */
 void toggle_mute() {
@@ -360,6 +411,17 @@ void toggle_mute() {
   setMute(settings.muted);
   save_eeprom();
   has_activity();
+}
+
+/**
+ * Toggle enable of indicator LEDs on the PCB
+ */
+void toggle_leds() {
+  settings.leds = settings.leds ? false : true;
+  Serial.print("settings.leds = ");
+  Serial.println(settings.leds);
+  setLEDs(settings.leds);
+  save_eeprom();
 }
 
 /**
@@ -380,7 +442,7 @@ void select_next_input() {
  * Check buttons for events
  */
 void check_buttons() {
-  for (auto i = 0; i < (int)(sizeof(buttons) / sizeof(button)); i++) {
+  for (auto i = 0; i < NUM_BUTTONS; i++) {
     buttons[i].check();
   }
 }
