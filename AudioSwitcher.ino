@@ -1,5 +1,7 @@
+#include <avr/pgmspace.h>
+
 // Uncomment to enable serial print debugging
-#define DEBUG
+// #define DEBUG
 
 // Uncomment to enable DEMO mode, where it cycles through inputs and mutes itself randomly
 // and will ignore normal user input
@@ -13,28 +15,56 @@
 // Doesn't work super well for OLEDs, but whatever.
 #define INACTIVITY_TIMEOUT 5 * 1000
 
-// Button inputs
-// Pin, callback()
-#define BTN_INPUT_SEL \
-  { 3, &select_next_input }
-#define BTN_TOGGLE_MUTE \
-  { 2, &toggle_mute }
-#define BTN_TOGGLE_LEDS \
-  { 10, &toggle_leds }
-#define NUM_BUTTONS 3
+// 'spotify_pixel_28x28', 28x28px
+const unsigned char input_bmp_spotify_pixel[] PROGMEM = {
+  0x00, 0x3f, 0xc0, 0x00, 0x00, 0x3f, 0xc0, 0x00, 0x03, 0xff, 0xfc, 0x00, 0x03, 0xff, 0xfc, 0x00,
+  0x0f, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00, 0x3f, 0xff, 0xff, 0xc0, 0x3f, 0xff, 0xff, 0xc0,
+  0x3c, 0x00, 0x03, 0xc0, 0xfc, 0x00, 0x03, 0xf0, 0xf3, 0xff, 0xfc, 0xf0, 0xf3, 0xff, 0xfc, 0xf0,
+  0xff, 0x00, 0x0f, 0xf0, 0xff, 0x00, 0x0f, 0xf0, 0xfc, 0xff, 0xf3, 0xf0, 0xfc, 0xff, 0xf3, 0xf0,
+  0xff, 0xc0, 0x3f, 0xf0, 0xff, 0xc0, 0x3f, 0xf0, 0xff, 0x3f, 0xcf, 0xf0, 0x3f, 0x3f, 0xcf, 0xc0,
+  0x3f, 0xff, 0xff, 0xc0, 0x3f, 0xff, 0xff, 0xc0, 0x0f, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00,
+  0x03, 0xff, 0xfc, 0x00, 0x03, 0xff, 0xfc, 0x00, 0x00, 0x3f, 0xc0, 0x00, 0x00, 0x3f, 0xc0, 0x00
+};
+// 'bt_pixel_28x28', 18x28px
+const unsigned char input_bmp_bt_pixel[] PROGMEM = {
+  0x07, 0xf8, 0x00, 0x0f, 0xfc, 0x00, 0x3f, 0xff, 0x00, 0x3f, 0xff, 0x00, 0x7f, 0x7f, 0x80, 0xff,
+  0x3f, 0xc0, 0xff, 0x1f, 0xc0, 0xff, 0x0f, 0xc0, 0xff, 0x27, 0xc0, 0xf7, 0x33, 0xc0, 0xf3, 0x23,
+  0xc0, 0xf9, 0x07, 0xc0, 0xfc, 0x0f, 0xc0, 0xfe, 0x1f, 0xc0, 0xfe, 0x3f, 0xc0, 0xfc, 0x1f, 0xc0,
+  0xf8, 0x0f, 0xc0, 0xf1, 0x27, 0xc0, 0xf3, 0x33, 0xc0, 0xff, 0x27, 0xc0, 0xff, 0x0f, 0xc0, 0xff,
+  0x1f, 0xc0, 0xff, 0x1f, 0xc0, 0x7f, 0x3f, 0x80, 0x3f, 0x7f, 0x00, 0x3f, 0xff, 0x00, 0x0f, 0xfc,
+  0x00, 0x07, 0xf8, 0x00
+};
+// 'aux_pixel_28x28', 17x28px
+const unsigned char input_bmp_aux_pixel[] PROGMEM = {
+  0x04, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f,
+  0x00, 0x00, 0x1f, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x1f, 0x01,
+  0x80, 0x1f, 0x03, 0x00, 0x3f, 0x86, 0x00, 0xff, 0xe2, 0x00, 0xff, 0xe3, 0x00, 0xff, 0xe1, 0x80,
+  0xff, 0xe0, 0x80, 0xff, 0xe0, 0x80, 0xff, 0xe3, 0x80, 0xff, 0xe2, 0x00, 0xff, 0xe2, 0x00, 0xff,
+  0xe3, 0x00, 0xff, 0xe1, 0x00, 0xff, 0xe1, 0x00, 0xff, 0xe1, 0x00, 0xff, 0xe1, 0x00, 0x04, 0x03,
+  0x00, 0x07, 0xfe, 0x00
+};
 
-// Audio input relay output trigger pins and descriptions
-// of the inputs for the LCD
-//
-// Inputs 1...N
-#define RELAY_INPUT_1_PIN 6
-#define RELAY_INPUT_2_PIN 7
-#define RELAY_INPUT_3_PIN 8
-#define RELAY_INPUT_4_PIN 9
-#define INPUT_RELAY_PINS \
-  { RELAY_INPUT_1_PIN, RELAY_INPUT_2_PIN, RELAY_INPUT_3_PIN };
-#define INPUT_DESCRIPTIONS \
-  { "Spotify", "Bluetooth", "Aux" }
+struct t_image {
+  const int width;
+  const int height;
+  const unsigned char *data;
+};
+
+// Audio input relay output trigger pins and descriptions of the inputs for the LCD
+struct t_signal_input {
+  const bool enabled;
+  const int relay_pin;
+  const char *desc;
+  const t_image image;
+};
+
+t_signal_input inputs[] = {
+  { true, 6, "Spotify", { 28, 28, input_bmp_spotify_pixel } },
+  { true, 7, "BT", { 18, 28, input_bmp_bt_pixel } },
+  { true, 8, "Aux", { 17, 28, input_bmp_aux_pixel } },
+  { false, 9, "Int. BT", { 0, 0, nullptr } }
+};
+const int number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
 
 // Delay, in ms, between switching inputs
 #define SWITCH_DELAY 250
@@ -91,11 +121,25 @@ DISPLAY_LCD_TYPE lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 void select_next_input();
 void toggle_mute();
 void toggle_leds();
+void switch_input(int input, int old_input = -1);
 
 struct data_store {
   byte selected_input = 0;
   bool muted = false;
   bool leds = false;
+} settings;
+
+struct t_input_switching {
+  bool is_switching = false;
+  int from = -1;
+  int to = 0;
+} switching_inputs;
+
+struct t_rect {
+  int x1;
+  int y1;
+  int x2;
+  int y2;
 };
 
 /**
@@ -194,38 +238,40 @@ struct button {
 
 // Define the physical input buttons
 button buttons[] = {
-  BTN_INPUT_SEL,
-  BTN_TOGGLE_MUTE,
-  BTN_TOGGLE_LEDS
+  { 3, &select_next_input },
+  { 2, &toggle_mute },
+  { 10, &toggle_leds }
 };
-
-const char *inputDescriptions[] = INPUT_DESCRIPTIONS;
-const int inputRelays[] = INPUT_RELAY_PINS;
-data_store settings;
+const int number_of_buttons = sizeof(button) / sizeof(buttons[0]);
 
 unsigned long last_active_millis = 0;
-unsigned long timer1 = 0;
 
 bool is_active = false;
-bool is_switching_output = false;
-int number_of_inputs = sizeof(inputRelays) / sizeof(inputRelays[0]);
 
 /**
  * Center text horizontally and vertically within the bounds of a given
  * box of rows.
  */
-void lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], int y = 0, int height = SCREEN_HEIGHT, int color = DISPLAY_WHITE, int fsize_x = 1, int fsize_y = 0) {
+t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], int x = 0, int y = 0, int height = SCREEN_HEIGHT, int color = DISPLAY_WHITE, int fsize_x = 1, int fsize_y = 0) {
   if (fsize_y < 1) {
     fsize_y = fsize_x;
   }
 
-  auto offset_x = SCREEN_WIDTH / 2 - ((strlen(str) + 1) * (FONT_WIDTH * fsize_x) / 2);
-  auto offset_y = (height / 2 - (FONT_HEIGHT * fsize_y) / 2);
+  auto text_width = (strlen(str) + 1) * (FONT_WIDTH * fsize_x);
+  auto text_height = (FONT_HEIGHT * fsize_y);
 
-  lcd.setCursor(offset_x, y + offset_y);
+  t_rect bounding_box;
+  bounding_box.x1 = (SCREEN_WIDTH - x) / 2 - (text_width / 2);
+  bounding_box.y1 = (height / 2 - text_height / 2);
+  bounding_box.x2 = bounding_box.x1 + text_width;
+  bounding_box.y2 = bounding_box.y1 + text_height;
+
+  lcd.setCursor(x + bounding_box.x1, y + bounding_box.y1);
   lcd.setTextColor(color);
   lcd.setTextSize(fsize_x, fsize_y);
   lcd.print(str);
+
+  return bounding_box;
 }
 
 // Dim the contrast as much a possible.
@@ -240,19 +286,33 @@ void display_dim() {
 }
 
 void setup() {
+#ifdef DEBUG
+  Serial.begin(115200);
+#endif
+
+  int num_enabled_inputs = 0;
   for (auto i = 0; i < number_of_inputs; i++) {
-    pinMode(inputRelays[i], OUTPUT);
+    if (!inputs[i].enabled) {
+      continue;
+    }
+
+    pinMode(inputs[i].relay_pin, OUTPUT);
+    num_enabled_inputs++;
+  }
+
+  if (num_enabled_inputs == 0) {
+#ifdef DEBUG
+    Serial.println(F("No inputs enabled. Please enable at least one output."));
+#endif
+    // This is an error state.
+    for (;;)
+      ;  // Don't proceed, loop forever
   }
 
   pinMode(OUTPUT_PIN, OUTPUT);
 
 #ifdef LED_PIN
   pinMode(LED_PIN, OUTPUT);
-  //digitalWrite(LED_PIN, HIGH);
-#endif
-
-#ifdef DEBUG
-  Serial.begin(115200);
 #endif
 
 #ifdef DEMO
@@ -287,8 +347,8 @@ void setup() {
   lcd.clearDisplay();
 
   auto half_height = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2;
-  lcd_center_text(lcd, "Audio", 0, half_height, DISPLAY_WHITE, 2);
-  lcd_center_text(lcd, "Switcher", half_height, half_height, DISPLAY_WHITE, 2);
+  lcd_center_text(lcd, "Audio", 0, 0, half_height, DISPLAY_WHITE, 2);
+  lcd_center_text(lcd, "Switcher", 0, half_height, half_height, DISPLAY_WHITE, 2);
 
   lcd.display();
   delay(1000);
@@ -298,17 +358,6 @@ void setup() {
   setLEDs(settings.leds);
 
   has_activity();
-}
-
-/**
- * Get the description of an input, if available
- */
-const char *get_input_desc(unsigned int input) {
-  if (input >= (sizeof(inputDescriptions) / sizeof(inputDescriptions[0]))) {
-    return "(no desc)";
-  }
-
-  return inputDescriptions[input];
 }
 
 /**
@@ -356,15 +405,51 @@ void update_display_active_region() {
   if (settings.muted) {
     lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_WHITE);
 
-    lcd_center_text(lcd, "Mute", MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_BLACK, 2);
+    lcd_center_text(lcd, "Mute", 0, MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_BLACK, 2);
   } else {
     lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_BLACK);
 
-    if (is_switching_output) {
-      lcd_center_text(lcd, "Wait", MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_WHITE, 2);
+    if (switching_inputs.is_switching) {
+      lcd_center_text(lcd, "Wait", 0, MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_WHITE, 2);
     } else {
-      lcd_center_text(lcd, "Active", MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_WHITE, 2);
+      lcd_center_text(lcd, "Active", 0, MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_WHITE, 2);
     }
+  }
+}
+void display_write_switching_outputs() {
+  char text[20];
+  sprintf(text, "#%d \x1A #%d", switching_inputs.from + 1, switching_inputs.to + 1);
+
+  // Adjust width of font depending on the length of the string.
+  auto fx = strlen(text) < 10 ? 2 : 1;
+  lcd_center_text(lcd, text, 0, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
+}
+
+void update_display_input_text() {
+  // Clear drawing area and draw the bounding rect
+  lcd.writeFillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_BLACK);
+  lcd.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE);
+
+  auto is_switching = switching_inputs.is_switching && switching_inputs.from > -1;
+  if (is_switching) {
+    display_write_switching_outputs();
+    return;
+  }
+
+  auto desc = inputs[settings.selected_input].desc;
+  auto image = inputs[settings.selected_input].image;
+  auto has_image = image.data != nullptr;
+
+  auto x_offset = has_image ? image.width + 2 : 0;
+  unsigned int max_txt_len = has_image ? 8 : 10;
+
+  // Adjust width of font depending on the length of the string.
+  auto fx = strlen(desc) < max_txt_len ? 2 : 1;
+  auto br = lcd_center_text(lcd, desc, x_offset, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
+
+  if (has_image) {
+    auto bmp_offset = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2 - (image.height / 2);
+    lcd.drawBitmap(br.x1 - 2, bmp_offset, image.data, image.width, image.height, DISPLAY_WHITE);
   }
 }
 
@@ -375,11 +460,7 @@ void update_display() {
   lcd.clearDisplay();
 
   update_display_active_region();
-  auto desc = get_input_desc(settings.selected_input);
-  // Adjust width of font depending on the length of the string.
-  auto fx = strlen(desc) < 10 ? 2 : 1;
-  lcd.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE);
-  lcd_center_text(lcd, desc, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
+  update_display_input_text();
 
   lcd.display();
 }
@@ -416,19 +497,22 @@ void toggleRelay(int pin, int state) {
 /**
  * Switch input from 'settings.selected_input' to 'input'
  */
-void switch_input(int input) {
+void switch_input(int input, int old_input) {
   // Disable output
   if (!settings.muted) {
     setMute(true);
     delay(20);
   }
 
-  is_switching_output = true;
+  switching_inputs.is_switching = true;
+  switching_inputs.from = old_input;
+  switching_inputs.to = input;
+
   update_display();
 
-  toggleRelay(inputRelays[settings.selected_input], LOW);
+  toggleRelay(inputs[settings.selected_input].relay_pin, LOW);
   delay(20);
-  toggleRelay(inputRelays[input], HIGH);
+  toggleRelay(inputs[input].relay_pin, HIGH);
 
   if (!settings.muted) {
     // Re-enable output
@@ -436,7 +520,7 @@ void switch_input(int input) {
     setMute(false);
   }
 
-  is_switching_output = false;
+  switching_inputs.is_switching = false;
 
   settings.selected_input = input;
   save_eeprom();
@@ -471,8 +555,10 @@ void toggle_mute() {
  */
 void toggle_leds() {
   settings.leds = settings.leds ? false : true;
+#ifdef DEBUG
   Serial.print("settings.leds = ");
   Serial.println(settings.leds);
+#endif
   setLEDs(settings.leds);
   save_eeprom();
 }
@@ -481,13 +567,22 @@ void toggle_leds() {
  * Select next input, cycling through the available inputs
  */
 void select_next_input() {
-  auto new_input = settings.selected_input + 1;
+  auto old_input = settings.selected_input;
+  auto new_input = old_input;
 
-  if (new_input == number_of_inputs) {
-    new_input = 0;
+  while (true) {
+    new_input++;
+
+    if (new_input == number_of_inputs) {
+      new_input = 0;
+    }
+
+    if (inputs[new_input].enabled) {
+      break;
+    }
   }
 
-  switch_input(new_input);
+  switch_input(new_input, old_input);
   has_activity();
 }
 
@@ -495,20 +590,18 @@ void select_next_input() {
  * Check buttons for events
  */
 void check_buttons() {
-  for (auto i = 0; i < NUM_BUTTONS; i++) {
+  for (int i = 0; i < number_of_buttons; i++) {
     buttons[i].check();
   }
 }
 
 void random_action() {
-  switch (random(1, 2)) {
-    case 1:
-      select_next_input();
-      break;
+  auto val = random(1, 50);
 
-    case 2:
-      toggle_mute();
-      break;
+  if (val < 40) {
+    select_next_input();
+  } else {
+    toggle_mute();
   }
 }
 
