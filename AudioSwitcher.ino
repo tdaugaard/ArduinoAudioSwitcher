@@ -1,6 +1,10 @@
 // Uncomment to enable serial print debugging
 #define DEBUG
 
+// Uncomment to enable DEMO mode, where it cycles through inputs and mutes itself randomly
+// and will ignore normal user input
+#define DEMO
+
 // 1 = SSD1306 128x64 with bottom part being yellow instead of cyan
 // 2 = SH1106G 128x64 cyan
 #define DISPLAY_TYPE 2
@@ -496,10 +500,33 @@ void check_buttons() {
   }
 }
 
+void random_action() {
+  switch (random(1, 2)) {
+    case 1:
+      select_next_input();
+      break;
+
+    case 2:
+      toggle_mute();
+      break;
+  }
+}
+
+unsigned long last_demo_millis = 0;
+
 void loop() {
   if (is_active && (millis() - last_active_millis) > INACTIVITY_TIMEOUT) {
     inactive();
   }
 
+#ifndef DEMO
   check_buttons();
+#endif
+
+#ifdef DEMO
+  if ((millis() - last_demo_millis) > 4000) {
+    random_action();
+    last_demo_millis = millis();
+  }
+#endif
 }
