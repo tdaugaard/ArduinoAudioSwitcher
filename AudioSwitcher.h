@@ -242,11 +242,10 @@ struct button
     }
 };
 
-
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 DISPLAY_LCD_TYPE lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-//void setup();
+void setup();
 t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], int x = 0, int y = 0, int height = SCREEN_HEIGHT, int color = DISPLAY_WHITE, int fsize_x = 1, int fsize_y = 0);
 void has_activity();
 void inactive();
@@ -267,7 +266,7 @@ void toggle_leds();
 void select_next_input();
 void select_prev_input();
 void check_buttons();
-void random_action();
-//void loop();
+void demo_mode();
+void loop();
 
 #endif
