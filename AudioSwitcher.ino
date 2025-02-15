@@ -1,4 +1,9 @@
+// Uncomment to enable serial print debugging
 #define DEBUG
+
+// 1 = SSD1306 128x64 with bottom part being yellow instead of cyan
+// 2 = SH1106G 128x64 cyan
+#define DISPLAY_TYPE 2
 
 // Timeout for dimming LCD in milliseconds
 // Doesn't work super well for OLEDs, but whatever.
@@ -42,18 +47,41 @@
 #include <EEPROM.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 
+#if DISPLAY_TYPE == 1
+#define DISPLAY_SSD1306_128X64
+#define DISPLAY_LCD_TYPE Adafruit_SSD1306
+#define DISPLAY_WHITE SSD1306_WHITE
+#define DISPLAY_BLACK SSD1306_BLACK
+
+#include <Adafruit_SSD1306.h>
 #define SCREEN_WIDTH 128  // OLED display width, in pixels
 #define SCREEN_HEIGHT 64  // OLED display height, in pixels
 #define SCREEN_TOP_BAR 16
 #define LCD_INVERT 0
 #define FONT_WIDTH 5
 #define FONT_HEIGHT 7
+
+#elif DISPLAY_TYPE == 2
+#define DISPLAY_SH1106G_128X64
+#define DISPLAY_LCD_TYPE Adafruit_SH1106G
+#define DISPLAY_WHITE SH110X_WHITE
+#define DISPLAY_BLACK SH110X_BLACK
+
+#include <Adafruit_SH110X.h>
+#define SCREEN_WIDTH 128  // OLED display width, in pixels
+#define SCREEN_HEIGHT 64  // OLED display height, in pixels
+#define SCREEN_TOP_BAR 24
+#define LCD_INVERT 0
+#define FONT_WIDTH 5
+#define FONT_HEIGHT 7
+
+#endif
+
 #define MUTE_TEXT_TOP SCREEN_HEIGHT - SCREEN_TOP_BAR
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-Adafruit_SSD1306 lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+DISPLAY_LCD_TYPE lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // Required to forward-declare these for use with 'buttons'
 void select_next_input();
@@ -182,7 +210,7 @@ int number_of_inputs = sizeof(inputRelays) / sizeof(inputRelays[0]);
  * Center text horizontally and vertically within the bounds of a given
  * box of rows.
  */
-void lcd_center_text(Adafruit_SSD1306 &lcd, const char str[], int y = 0, int height = SCREEN_HEIGHT, int color = SSD1306_WHITE, int fsize_x = 1, int fsize_y = 0) {
+void lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], int y = 0, int height = SCREEN_HEIGHT, int color = DISPLAY_WHITE, int fsize_x = 1, int fsize_y = 0) {
   if (fsize_y < 1) {
     fsize_y = fsize_x;
   }
@@ -194,6 +222,17 @@ void lcd_center_text(Adafruit_SSD1306 &lcd, const char str[], int y = 0, int hei
   lcd.setTextColor(color);
   lcd.setTextSize(fsize_x, fsize_y);
   lcd.print(str);
+}
+
+// Dim the contrast as much a possible.
+void display_dim() {
+#if defined(DISPLAY_SSD1306_128X64)
+  lcd.ssd1306_command(SSD1306_SETCONTRAST);
+  lcd.ssd1306_command(0);
+#elif defined(DISPLAY_SH1106G_128X64)
+  lcd.oled_command(SH110X_SETCONTRAST);
+  lcd.oled_command(0);
+#endif
 }
 
 void setup() {
@@ -212,18 +251,29 @@ void setup() {
   Serial.begin(115200);
 #endif
 
+#ifdef DEMO
+  randomSeed(analogRead(0));
+#endif
+
   SPI.begin();
 
+#if defined(DISPLAY_SSD1306_128X64)
+  auto display_begin = lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+#elif defined(DISPLAY_SH1106G_128X64)
+  auto display_begin = lcd.begin(0x3C);
+#endif
+
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if (!lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  // Address 0x3C for 128x32
+  if (!display_begin) {  // Address 0x3C for 128x32
     Serial.println(F("SSD1306 allocation failed"));
     for (;;)
       ;  // Don't proceed, loop forever
   }
 
-  // Dim the contrast as much a possible.
-  lcd.ssd1306_command(SSD1306_SETCONTRAST);
-  lcd.ssd1306_command(0);
+#if defined(DISPLAY_SSD1306_128X64) || defined(DISPLAY_SH1106G_128X64)
+  display_dim();
+#endif
+
   lcd.invertDisplay(LCD_INVERT != 0);
   lcd.cp437(true);  // Use full 256 char 'Code Page 437' font
   lcd.setRotation(90);
@@ -233,8 +283,8 @@ void setup() {
   lcd.clearDisplay();
 
   auto half_height = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2;
-  lcd_center_text(lcd, "Audio", 0, half_height, SSD1306_WHITE, 2);
-  lcd_center_text(lcd, "Switcher", half_height, half_height, SSD1306_WHITE, 2);
+  lcd_center_text(lcd, "Audio", 0, half_height, DISPLAY_WHITE, 2);
+  lcd_center_text(lcd, "Switcher", half_height, half_height, DISPLAY_WHITE, 2);
 
   lcd.display();
   delay(1000);
@@ -277,8 +327,7 @@ void has_activity() {
 void inactive() {
   is_active = false;
 
-  lcd.ssd1306_command(SSD1306_SETCONTRAST);
-  lcd.ssd1306_command(0);
+  display_dim();
 
   lcd_dim();
   lcd.display();
@@ -294,23 +343,23 @@ void dither_box(int x1, int y1, int x2, int y2, int color) {
 }
 
 void lcd_dim() {
-  dither_box(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
-  dither_box(1, 1, SCREEN_WIDTH - 2, SCREEN_HEIGHT - SCREEN_TOP_BAR - 2, SSD1306_BLACK);
+  dither_box(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_BLACK);
+  dither_box(1, 1, SCREEN_WIDTH - 2, SCREEN_HEIGHT - SCREEN_TOP_BAR - 2, DISPLAY_BLACK);
 }
 
 void update_display_active_region() {
   // Mute state
   if (settings.muted) {
-    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_WHITE);
+    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_WHITE);
 
-    lcd_center_text(lcd, "Mute", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_BLACK, 2);
+    lcd_center_text(lcd, "Mute", MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_BLACK, 2);
   } else {
-    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
+    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_BLACK);
 
     if (is_switching_output) {
-      lcd_center_text(lcd, "Wait", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_WHITE, 2);
+      lcd_center_text(lcd, "Wait", MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_WHITE, 2);
     } else {
-      lcd_center_text(lcd, "Active", MUTE_TEXT_TOP, SCREEN_TOP_BAR, SSD1306_WHITE, 2);
+      lcd_center_text(lcd, "Active", MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_WHITE, 2);
     }
   }
 }
@@ -325,8 +374,8 @@ void update_display() {
   auto desc = get_input_desc(settings.selected_input);
   // Adjust width of font depending on the length of the string.
   auto fx = strlen(desc) < 10 ? 2 : 1;
-  lcd.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, SSD1306_WHITE);
-  lcd_center_text(lcd, desc, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, SSD1306_WHITE, fx, 4);
+  lcd.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE);
+  lcd_center_text(lcd, desc, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
 
   lcd.display();
 }
