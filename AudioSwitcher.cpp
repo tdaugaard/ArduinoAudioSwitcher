@@ -5,6 +5,14 @@
 // and will ignore normal user input
 // #define DEMO
 
+// 1 = SSD1306 128x64 with bottom part being yellow instead of cyan
+// 2 = SH1106G 128x64 cyan
+#define DISPLAY_TYPE 1
+
+// Timeout for dimming LCD in milliseconds
+// Doesn't work super well for OLEDs, but whatever.
+#define INACTIVITY_TIMEOUT 5 * 1000
+
 #include "AudioSwitcher.h"
 
 // Define the physical input buttons
@@ -13,6 +21,15 @@ button buttons[] = {
     {2, &toggle_mute},
     {10, &toggle_leds}};
 const uint8_t number_of_buttons = sizeof(buttons) / sizeof(buttons[0]);
+
+// Inputs can be reordered so switching order is different from physical order
+t_signal_input inputs[] = {
+    {true, 6, "Spotify", IMG_SPOTIFY},       // Phy #1
+    {true, 9, "Int. BT", IMG_BLUETOOTH_INT}, // Phy #4
+    {true, 8, "Aux", IMG_AUX},               // Phy #3
+    {true, 7, "BT", IMG_BLUETOOTH_EXT}       // Phy #2
+};
+const uint8_t number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
 
 unsigned long last_active_millis = 0;
 unsigned long last_demo_millis = 0;
@@ -222,7 +239,7 @@ void update_display_input_text()
   lcd.writeFillRect(0, 0, lcd.width(), lcd.height() - SCREEN_TOP_BAR, DISPLAY_BLACK);
   lcd.drawRect(0, 0, lcd.width(), lcd.height() - SCREEN_TOP_BAR, DISPLAY_WHITE);
 
-  auto is_switching = switching_inputs.is_switching && switching_inputs.from != 255;
+  auto is_switching = switching_inputs.is_switching && switching_inputs.from != MAX_INPUTS;
   if (is_switching)
   {
     display_write_switching_outputs();
@@ -267,7 +284,8 @@ void update_display()
 void eeprom_save()
 {
 #ifndef DEMO
-  if (is_initialized) {
+  if (is_initialized)
+  {
     EEPROM.put(0, settings);
   }
 #endif
@@ -447,7 +465,6 @@ void demo_mode()
 #endif
 
   buttons[btn].trigger();
-
 }
 
 void loop()
