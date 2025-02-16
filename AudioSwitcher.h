@@ -1,9 +1,10 @@
 #ifndef AUDIOSWITCHER_H
 #define AUDIOSWITCHER_H
 #include <avr/pgmspace.h>
-
-// Uncomment to enable serial print debugging
-#define DEBUG
+#include <Arduino.h>
+#include <EEPROM.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
 
 // 1 = SSD1306 128x64 with bottom part being yellow instead of cyan
 // 2 = SH1106G 128x64 cyan
@@ -12,6 +13,8 @@
 // Timeout for dimming LCD in milliseconds
 // Doesn't work super well for OLEDs, but whatever.
 #define INACTIVITY_TIMEOUT 5 * 1000
+
+typedef byte t_smallint;
 
 // 'spotify_pixel_28x28', 28x28px
 const unsigned char input_bmp_spotify_pixel[] PROGMEM = {
@@ -41,8 +44,8 @@ const unsigned char input_bmp_aux_pixel[] PROGMEM = {
 
 struct t_image
 {
-    const int width;
-    const int height;
+    const t_smallint width;
+    const t_smallint height;
     const unsigned char *data;
 };
 
@@ -50,7 +53,7 @@ struct t_image
 struct t_signal_input
 {
     const bool enabled;
-    const int relay_pin;
+    const t_smallint relay_pin;
     const char *desc;
     const t_image image;
 };
@@ -60,7 +63,7 @@ t_signal_input inputs[] = {
     {true, 7, "BT", {18, 28, input_bmp_bt_pixel}},
     {true, 8, "Aux", {17, 28, input_bmp_aux_pixel}},
     {false, 9, "Int. BT", {0, 0, nullptr}}};
-const int number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
+const t_smallint number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
 
 // Delay, in ms, between switching inputs
 #define SWITCH_DELAY 250
@@ -72,46 +75,34 @@ const int number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
 // Comment out to disable LEDs.
 #define LED_PIN 4
 
-#include <SPI.h>
-#include <EEPROM.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-
 #if DISPLAY_TYPE == 1
+#include <Adafruit_SSD1306.h>
 #define DISPLAY_SSD1306_128X64
 #define DISPLAY_LCD_TYPE Adafruit_SSD1306
 #define DISPLAY_WHITE SSD1306_WHITE
 #define DISPLAY_BLACK SSD1306_BLACK
-
-#include <Adafruit_SSD1306.h>
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define SCREEN_TOP_BAR 16
-#define LCD_INVERT 0
-#define FONT_WIDTH 5
-#define FONT_HEIGHT 7
 
 #elif DISPLAY_TYPE == 2
+#include <Adafruit_SH110X.h>
 #define DISPLAY_SH1106G_128X64
 #define DISPLAY_LCD_TYPE Adafruit_SH1106G
 #define DISPLAY_WHITE SH110X_WHITE
 #define DISPLAY_BLACK SH110X_BLACK
-
-#include <Adafruit_SH110X.h>
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
 #define SCREEN_TOP_BAR 24
+#endif
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
 #define LCD_INVERT 0
 #define FONT_WIDTH 5
 #define FONT_HEIGHT 7
-
-#endif
 
 #define MUTE_TEXT_TOP SCREEN_HEIGHT - SCREEN_TOP_BAR
 
 struct data_store
 {
-    byte selected_input = 0;
+    t_smallint selected_input = 0;
     bool muted = false;
     bool leds = false;
 } settings;
@@ -119,16 +110,16 @@ struct data_store
 struct t_input_switching
 {
     bool is_switching = false;
-    int from = -1;
-    int to = 0;
+    t_smallint from = -1;
+    t_smallint to = 0;
 } switching_inputs;
 
 struct t_rect
 {
-    int x1;
-    int y1;
-    int x2;
-    int y2;
+    t_smallint x1;
+    t_smallint y1;
+    t_smallint x2;
+    t_smallint y2;
 };
 
 /**
@@ -142,20 +133,20 @@ struct button
     bool m_state = false;
     unsigned long m_debounce_millis;
 
-    int pin;
-    int a_val_min;
-    int a_val_max;
+    t_smallint pin;
+    t_smallint a_val_min;
+    t_smallint a_val_max;
     void (*fn_pressed)() = NULL;
     void (*fn_released)() = NULL;
-    int m_debounce_delay;
+    t_smallint m_debounce_delay;
     bool analog_mode = false;
 
     // Analog resistor-based input buttons
-    button(int input_pin, int aval_min, int aval_max, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, int debounce_delay = 100)
+    button(t_smallint input_pin, t_smallint aval_min, t_smallint aval_max, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, t_smallint debounce_delay = 100)
         : pin(input_pin), a_val_min(aval_min), a_val_max(aval_max), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay), analog_mode(true) {}
 
     // Digital input buttons
-    button(int input_pin, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, int debounce_delay = 100)
+    button(t_smallint input_pin, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, t_smallint debounce_delay = 100)
         : pin(input_pin), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay)
     {
         // Using the internal pullup means we can use only one grounding resistor
@@ -246,10 +237,10 @@ struct button
 DISPLAY_LCD_TYPE lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 void setup();
-t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], int x = 0, int y = 0, int height = SCREEN_HEIGHT, int color = DISPLAY_WHITE, int fsize_x = 1, int fsize_y = 0);
+t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], t_smallint x = 0, t_smallint y = 0, t_smallint height = SCREEN_HEIGHT, t_smallint color = DISPLAY_WHITE, t_smallint fsize_x = 1, t_smallint fsize_y = 0);
 void has_activity();
 void inactive();
-void dither_box(int x1, int y1, int x2, int y2, int color);
+void dither_box(t_smallint x1, t_smallint y1, t_smallint x2, t_smallint y2, t_smallint color);
 void lcd_dim();
 void update_display_active_region();
 void display_write_switching_outputs();
@@ -257,8 +248,8 @@ void update_display_input_text();
 void update_display();
 void eeprom_save();
 void eeprom_read();
-void toggle_relay(int pin, int state);
-void switch_input(int input, int old_input = -1);
+void toggle_relay(t_smallint pin, t_smallint state);
+void switch_input(t_smallint input, t_smallint old_input = -1);
 void set_mute(bool muted);
 void set_LEDs(bool state);
 void toggle_mute();

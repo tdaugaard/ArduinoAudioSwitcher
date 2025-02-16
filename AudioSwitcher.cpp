@@ -1,19 +1,18 @@
-#include "AudioSwitcher.h"
-#include <avr/pgmspace.h>
-
-// Uncomment to enable serial print debugging
+// Uncomment to enable serial prt_smallint debugging
 #define DEBUG
 
 // Uncomment to enable DEMO mode, where it cycles through inputs and mutes itself randomly
 // and will ignore normal user input
 // #define DEMO
 
+#include "AudioSwitcher.h"
+
 // Define the physical input buttons
 button buttons[] = {
     {3, &select_next_input},
     {2, &toggle_mute},
     {10, &toggle_leds}};
-const int number_of_buttons = sizeof(button) / sizeof(buttons[0]);
+const t_smallint number_of_buttons = sizeof(button) / sizeof(buttons[0]);
 
 unsigned long last_active_millis = 0;
 bool is_active = false;
@@ -22,15 +21,15 @@ bool is_active = false;
  * Center text horizontally and vertically within the bounds of a given
  * box of rows.
  */
-t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], int x, int y, int height, int color, int fsize_x, int fsize_y)
+t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], t_smallint x, t_smallint y, t_smallint height, t_smallint color, t_smallint fsize_x, t_smallint fsize_y)
 {
   if (fsize_y < 1)
   {
     fsize_y = fsize_x;
   }
 
-  auto text_width = (strlen(str) + 1) * (FONT_WIDTH * fsize_x);
-  auto text_height = (FONT_HEIGHT * fsize_y);
+  t_smallint text_width = (strlen(str) + 1) * (FONT_WIDTH * fsize_x);
+  t_smallint text_height = (FONT_HEIGHT * fsize_y);
 
   t_rect bounding_box;
   bounding_box.x1 = (SCREEN_WIDTH - x) / 2 - (text_width / 2);
@@ -64,8 +63,8 @@ void setup()
   Serial.begin(115200);
 #endif
 
-  int num_enabled_inputs = 0;
-  for (auto i = 0; i < number_of_inputs; i++)
+  t_smallint num_enabled_inputs = 0;
+  for (t_smallint i = 0; i < number_of_inputs; i++)
   {
     if (!inputs[i].enabled)
     {
@@ -96,8 +95,6 @@ void setup()
   randomSeed(analogRead(0));
 #endif
 
-  SPI.begin();
-
 #if defined(DISPLAY_SSD1306_128X64)
   auto display_begin = lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C);
 #elif defined(DISPLAY_SH1106G_128X64)
@@ -124,7 +121,7 @@ void setup()
   // the library initializes this with an Adafruit splash screen.
   lcd.clearDisplay();
 
-  auto half_height = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2;
+  t_smallint half_height = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2;
   lcd_center_text(lcd, "Audio", 0, 0, half_height, DISPLAY_WHITE, 2);
   lcd_center_text(lcd, "Switcher", 0, half_height, half_height, DISPLAY_WHITE, 2);
 
@@ -167,13 +164,13 @@ void inactive()
   lcd.display();
 }
 
-void dither_box(int x1, int y1, int x2, int y2, int color)
+void dither_box(t_smallint x1, t_smallint y1, t_smallint x2, t_smallint y2, t_smallint color)
 {
-  for (auto y = y1; y < y2; y += 2)
+  for (t_smallint y = y1; y < y2; y += 2)
   {
     lcd.drawLine(x1, y, x2, y, color);
   }
-  for (auto x = x1; x < x2; x += 2)
+  for (t_smallint x = x1; x < x2; x += 2)
   {
     lcd.drawLine(x, y1, x, y2, color);
   }
@@ -216,7 +213,7 @@ void display_write_switching_outputs()
   sprintf(text, "#%d %s #%d", switching_inputs.from + 1, direction_char, switching_inputs.to + 1);
 
   // Adjust width of font depending on the length of the string.
-  auto fx = strlen(text) < 10 ? 2 : 1;
+  t_smallint fx = strlen(text) < 10 ? 2 : 1;
   lcd_center_text(lcd, text, 0, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
 }
 
@@ -226,7 +223,7 @@ void update_display_input_text()
   lcd.writeFillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_BLACK);
   lcd.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE);
 
-  auto is_switching = switching_inputs.is_switching && switching_inputs.from > -1;
+  auto is_switching = switching_inputs.is_switching && switching_inputs.from != 255;
   if (is_switching)
   {
     display_write_switching_outputs();
@@ -237,16 +234,16 @@ void update_display_input_text()
   auto image = inputs[settings.selected_input].image;
   auto has_image = image.data != nullptr;
 
-  auto x_offset = has_image ? image.width + 2 : 0;
-  unsigned int max_txt_len = has_image ? 8 : 10;
+  t_smallint x_offset = has_image ? image.width + 2 : 0;
+  t_smallint max_txt_len = has_image ? 8 : 10;
 
   // Adjust width of font depending on the length of the string.
-  auto fx = strlen(desc) < max_txt_len ? 2 : 1;
+  t_smallint fx = strlen(desc) < max_txt_len ? 2 : 1;
   auto br = lcd_center_text(lcd, desc, x_offset, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
 
   if (has_image)
   {
-    auto bmp_offset = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2 - (image.height / 2);
+    t_smallint bmp_offset = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2 - (image.height / 2);
     lcd.drawBitmap(br.x1 - 2, bmp_offset, image.data, image.width, image.height, DISPLAY_WHITE);
   }
 }
@@ -292,7 +289,7 @@ void eeprom_read()
 /**
  * Set relay state of the given pin
  */
-void toggle_relay(int pin, int state)
+void toggle_relay(t_smallint pin, t_smallint state)
 {
   digitalWrite(pin, state);
 }
@@ -300,7 +297,7 @@ void toggle_relay(int pin, int state)
 /**
  * Switch input from 'settings.selected_input' to 'input'
  */
-void switch_input(int input, int old_input)
+void switch_input(t_smallint input, t_smallint old_input)
 {
   // Disable output
   if (!settings.muted)
@@ -427,40 +424,29 @@ void select_prev_input()
   has_activity();
 }
 
-
 /**
  * Check buttons for events
  */
 void check_buttons()
 {
-  for (int i = 0; i < number_of_buttons; i++)
+  for (t_smallint i = 0; i < number_of_buttons; i++)
   {
     buttons[i].check();
   }
 }
 
-int demo_mode_action = 0;
-
 void demo_mode()
 {
-  if (demo_mode_action >= 0 && demo_mode_action < 6)
+  auto val = random(1, 50);
+
+  if ((!settings.muted && val < 40) || (settings.muted && val < 25))
   {
     select_next_input();
   }
-  else if (demo_mode_action >= 6 && demo_mode_action < 12)
-  {
-    select_prev_input();
-  }
-  else if (demo_mode_action >= 12 && demo_mode_action < 14)
+  else
   {
     toggle_mute();
   }
-  else
-  {
-    demo_mode_action = 0;
-  }
-
-  demo_mode_action++;
 }
 
 unsigned long last_demo_millis = 0;
