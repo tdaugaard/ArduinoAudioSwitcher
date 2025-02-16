@@ -14,8 +14,6 @@
 // Doesn't work super well for OLEDs, but whatever.
 #define INACTIVITY_TIMEOUT 5 * 1000
 
-typedef byte t_smallint;
-
 // 'spotify_pixel_28x28', 28x28px
 const unsigned char input_bmp_spotify_pixel[] PROGMEM = {
     0x00, 0x3f, 0xc0, 0x00, 0x00, 0x3f, 0xc0, 0x00, 0x03, 0xff, 0xfc, 0x00, 0x03, 0xff, 0xfc, 0x00,
@@ -44,8 +42,8 @@ const unsigned char input_bmp_aux_pixel[] PROGMEM = {
 
 struct t_image
 {
-    const t_smallint width;
-    const t_smallint height;
+    const uint8_t width;
+    const uint8_t height;
     const unsigned char *data;
 };
 
@@ -53,7 +51,7 @@ struct t_image
 struct t_signal_input
 {
     const bool enabled;
-    const t_smallint relay_pin;
+    const uint8_t relay_pin;
     const char *desc;
     const t_image image;
 };
@@ -62,8 +60,8 @@ t_signal_input inputs[] = {
     {true, 6, "Spotify", {28, 28, input_bmp_spotify_pixel}},
     {true, 7, "BT", {18, 28, input_bmp_bt_pixel}},
     {true, 8, "Aux", {17, 28, input_bmp_aux_pixel}},
-    {false, 9, "Int. BT", {0, 0, nullptr}}};
-const t_smallint number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
+    {false, 9, "Int. BT", {}}};
+const uint8_t number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
 
 // Delay, in ms, between switching inputs
 #define SWITCH_DELAY 250
@@ -102,24 +100,25 @@ const t_smallint number_of_inputs = sizeof(inputs) / sizeof(inputs[0]);
 
 struct data_store
 {
-    t_smallint selected_input = 0;
+    uint8_t selected_input = 0;
     bool muted = false;
     bool leds = false;
 } settings;
 
+#define MAX_INPUTS 255
 struct t_input_switching
 {
     bool is_switching = false;
-    t_smallint from = -1;
-    t_smallint to = 0;
+    uint8_t from = MAX_INPUTS;
+    uint8_t to = 0;
 } switching_inputs;
 
 struct t_rect
 {
-    t_smallint x1;
-    t_smallint y1;
-    t_smallint x2;
-    t_smallint y2;
+    uint8_t x1;
+    uint8_t y1;
+    uint8_t x2;
+    uint8_t y2;
 };
 
 /**
@@ -133,20 +132,20 @@ struct button
     bool m_state = false;
     unsigned long m_debounce_millis;
 
-    t_smallint pin;
-    t_smallint a_val_min;
-    t_smallint a_val_max;
+    const uint8_t pin;
+    uint8_t a_val_min;
+    uint8_t a_val_max;
     void (*fn_pressed)() = NULL;
     void (*fn_released)() = NULL;
-    t_smallint m_debounce_delay;
-    bool analog_mode = false;
+    const uint8_t m_debounce_delay;
+    const bool analog_mode = false;
 
     // Analog resistor-based input buttons
-    button(t_smallint input_pin, t_smallint aval_min, t_smallint aval_max, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, t_smallint debounce_delay = 100)
+    button(uint8_t input_pin, uint8_t aval_min, uint8_t aval_max, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, uint8_t debounce_delay = 100)
         : pin(input_pin), a_val_min(aval_min), a_val_max(aval_max), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay), analog_mode(true) {}
 
     // Digital input buttons
-    button(t_smallint input_pin, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, t_smallint debounce_delay = 100)
+    button(uint8_t input_pin, void (*fnPressed)() = NULL, void (*fnReleased)() = NULL, uint8_t debounce_delay = 100)
         : pin(input_pin), fn_pressed(fnPressed), fn_released(fnReleased), m_debounce_delay(debounce_delay)
     {
         // Using the internal pullup means we can use only one grounding resistor
@@ -159,20 +158,15 @@ struct button
      */
     bool check()
     {
-        if (!m_state)
+        if (!m_state && check_state())
         {
-            if (check_state())
-            {
-                state_changed(true);
-                return true;
-            }
+            state_changed(true);
+            return true;
         }
-        else
+
+        if (m_state && !check_state())
         {
-            if (!check_state())
-            {
-                state_changed(false);
-            }
+            state_changed(false);
         }
 
         return false;
@@ -192,6 +186,18 @@ struct button
         return digitalRead(pin) == LOW;
     }
 
+    void trigger()
+    {
+        if (fn_pressed != NULL)
+        {
+            (*fn_pressed)();
+        }
+        else if (fn_released != NULL)
+        {
+            (*fn_released)();
+        }
+    }
+
     void state_changed(bool state)
     {
         if (m_debounce_millis > 0 && m_debounce_millis + m_debounce_delay > millis())
@@ -201,7 +207,6 @@ struct button
         }
 
         m_debounce_millis = millis();
-
         m_state = state;
 
         if (m_state)
@@ -237,10 +242,10 @@ struct button
 DISPLAY_LCD_TYPE lcd(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 void setup();
-t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], t_smallint x = 0, t_smallint y = 0, t_smallint height = SCREEN_HEIGHT, t_smallint color = DISPLAY_WHITE, t_smallint fsize_x = 1, t_smallint fsize_y = 0);
+t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], uint8_t x = 0, uint8_t y = 0, uint8_t height = SCREEN_HEIGHT, uint8_t color = DISPLAY_WHITE, uint8_t fsize_x = 1, uint8_t fsize_y = 0);
 void has_activity();
 void inactive();
-void dither_box(t_smallint x1, t_smallint y1, t_smallint x2, t_smallint y2, t_smallint color);
+void dither_box(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color);
 void lcd_dim();
 void update_display_active_region();
 void display_write_switching_outputs();
@@ -248,8 +253,8 @@ void update_display_input_text();
 void update_display();
 void eeprom_save();
 void eeprom_read();
-void toggle_relay(t_smallint pin, t_smallint state);
-void switch_input(t_smallint input, t_smallint old_input = -1);
+void toggle_relay(uint8_t pin, uint8_t state);
+void switch_input(uint8_t input, uint8_t old_input = -1);
 void set_mute(bool muted);
 void set_LEDs(bool state);
 void toggle_mute();

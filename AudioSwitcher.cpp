@@ -12,27 +12,29 @@ button buttons[] = {
     {3, &select_next_input},
     {2, &toggle_mute},
     {10, &toggle_leds}};
-const t_smallint number_of_buttons = sizeof(button) / sizeof(buttons[0]);
+const uint8_t number_of_buttons = sizeof(buttons) / sizeof(buttons[0]);
 
 unsigned long last_active_millis = 0;
+unsigned long last_demo_millis = 0;
 bool is_active = false;
+bool is_initialized = false;
 
 /**
  * Center text horizontally and vertically within the bounds of a given
  * box of rows.
  */
-t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], t_smallint x, t_smallint y, t_smallint height, t_smallint color, t_smallint fsize_x, t_smallint fsize_y)
+t_rect lcd_center_text(DISPLAY_LCD_TYPE &lcd, const char str[], uint8_t x, uint8_t y, uint8_t height, uint8_t color, uint8_t fsize_x, uint8_t fsize_y)
 {
   if (fsize_y < 1)
   {
     fsize_y = fsize_x;
   }
 
-  t_smallint text_width = (strlen(str) + 1) * (FONT_WIDTH * fsize_x);
-  t_smallint text_height = (FONT_HEIGHT * fsize_y);
+  uint8_t text_width = (strlen(str) + 1) * (FONT_WIDTH * fsize_x);
+  uint8_t text_height = (FONT_HEIGHT * fsize_y);
 
   t_rect bounding_box;
-  bounding_box.x1 = (SCREEN_WIDTH - x) / 2 - (text_width / 2);
+  bounding_box.x1 = (lcd.width() - x) / 2 - (text_width / 2);
   bounding_box.y1 = (height / 2 - text_height / 2);
   bounding_box.x2 = bounding_box.x1 + text_width;
   bounding_box.y2 = bounding_box.y1 + text_height;
@@ -63,8 +65,8 @@ void setup()
   Serial.begin(115200);
 #endif
 
-  t_smallint num_enabled_inputs = 0;
-  for (t_smallint i = 0; i < number_of_inputs; i++)
+  uint8_t num_enabled_inputs = 0;
+  for (uint8_t i = 0; i < number_of_inputs; i++)
   {
     if (!inputs[i].enabled)
     {
@@ -109,9 +111,7 @@ void setup()
       ; // Don't proceed, loop forever
   }
 
-#if defined(DISPLAY_SSD1306_128X64) || defined(DISPLAY_SH1106G_128X64)
   display_dim();
-#endif
 
   lcd.invertDisplay(LCD_INVERT != 0);
   lcd.cp437(true); // Use full 256 char 'Code Page 437' font
@@ -121,18 +121,19 @@ void setup()
   // the library initializes this with an Adafruit splash screen.
   lcd.clearDisplay();
 
-  t_smallint half_height = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2;
+  uint8_t half_height = (lcd.height() - SCREEN_TOP_BAR) / 2;
   lcd_center_text(lcd, "Audio", 0, 0, half_height, DISPLAY_WHITE, 2);
   lcd_center_text(lcd, "Switcher", 0, half_height, half_height, DISPLAY_WHITE, 2);
 
   lcd.display();
   delay(1000);
 
-  // eeprom_read();
+  eeprom_read();
   switch_input(settings.selected_input);
   set_LEDs(settings.leds);
 
   has_activity();
+  is_initialized = true;
 }
 
 /**
@@ -164,13 +165,13 @@ void inactive()
   lcd.display();
 }
 
-void dither_box(t_smallint x1, t_smallint y1, t_smallint x2, t_smallint y2, t_smallint color)
+void dither_box(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2, uint8_t color)
 {
-  for (t_smallint y = y1; y < y2; y += 2)
+  for (auto y = y1; y < y2; y += 2)
   {
     lcd.drawLine(x1, y, x2, y, color);
   }
-  for (t_smallint x = x1; x < x2; x += 2)
+  for (auto x = x1; x < x2; x += 2)
   {
     lcd.drawLine(x, y1, x, y2, color);
   }
@@ -178,8 +179,8 @@ void dither_box(t_smallint x1, t_smallint y1, t_smallint x2, t_smallint y2, t_sm
 
 void lcd_dim()
 {
-  dither_box(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_BLACK);
-  dither_box(1, 1, SCREEN_WIDTH - 2, SCREEN_HEIGHT - SCREEN_TOP_BAR - 2, DISPLAY_BLACK);
+  dither_box(0, MUTE_TEXT_TOP, lcd.width(), lcd.height(), DISPLAY_BLACK);
+  dither_box(1, 1, lcd.width() - 2, lcd.height() - SCREEN_TOP_BAR - 2, DISPLAY_BLACK);
 }
 
 void update_display_active_region()
@@ -187,13 +188,13 @@ void update_display_active_region()
   // Mute state
   if (settings.muted)
   {
-    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_WHITE);
+    lcd.fillRect(0, MUTE_TEXT_TOP, lcd.width(), lcd.height(), DISPLAY_WHITE);
 
     lcd_center_text(lcd, "Mute", 0, MUTE_TEXT_TOP, SCREEN_TOP_BAR, DISPLAY_BLACK, 2);
   }
   else
   {
-    lcd.fillRect(0, MUTE_TEXT_TOP, SCREEN_WIDTH, SCREEN_HEIGHT, DISPLAY_BLACK);
+    lcd.fillRect(0, MUTE_TEXT_TOP, lcd.width(), lcd.height(), DISPLAY_BLACK);
 
     if (switching_inputs.is_switching)
     {
@@ -207,21 +208,19 @@ void update_display_active_region()
 }
 void display_write_switching_outputs()
 {
-  auto direction_char = switching_inputs.to > switching_inputs.from ? "\x1A" : "\x1B";
-
   char text[20];
-  sprintf(text, "#%d %s #%d", switching_inputs.from + 1, direction_char, switching_inputs.to + 1);
+  sprintf(text, "#%d \x1A #%d", switching_inputs.from + 1, switching_inputs.to + 1);
 
   // Adjust width of font depending on the length of the string.
-  t_smallint fx = strlen(text) < 10 ? 2 : 1;
-  lcd_center_text(lcd, text, 0, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
+  uint8_t fx = strlen(text) < 10 ? 2 : 1;
+  lcd_center_text(lcd, text, 0, 0, lcd.height() - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
 }
 
 void update_display_input_text()
 {
   // Clear drawing area and draw the bounding rect
-  lcd.writeFillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_BLACK);
-  lcd.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE);
+  lcd.writeFillRect(0, 0, lcd.width(), lcd.height() - SCREEN_TOP_BAR, DISPLAY_BLACK);
+  lcd.drawRect(0, 0, lcd.width(), lcd.height() - SCREEN_TOP_BAR, DISPLAY_WHITE);
 
   auto is_switching = switching_inputs.is_switching && switching_inputs.from != 255;
   if (is_switching)
@@ -234,16 +233,16 @@ void update_display_input_text()
   auto image = inputs[settings.selected_input].image;
   auto has_image = image.data != nullptr;
 
-  t_smallint x_offset = has_image ? image.width + 2 : 0;
-  t_smallint max_txt_len = has_image ? 8 : 10;
+  uint8_t x_offset = has_image ? image.width + 2 : 0;
+  uint8_t max_txt_len = has_image ? 8 : 10;
 
   // Adjust width of font depending on the length of the string.
-  t_smallint fx = strlen(desc) < max_txt_len ? 2 : 1;
-  auto br = lcd_center_text(lcd, desc, x_offset, 0, SCREEN_HEIGHT - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
+  uint8_t fx = strlen(desc) < max_txt_len ? 2 : 1;
+  auto br = lcd_center_text(lcd, desc, x_offset, 0, lcd.height() - SCREEN_TOP_BAR, DISPLAY_WHITE, fx, 4);
 
   if (has_image)
   {
-    t_smallint bmp_offset = (SCREEN_HEIGHT - SCREEN_TOP_BAR) / 2 - (image.height / 2);
+    uint8_t bmp_offset = (lcd.height() - SCREEN_TOP_BAR) / 2 - (image.height / 2);
     lcd.drawBitmap(br.x1 - 2, bmp_offset, image.data, image.width, image.height, DISPLAY_WHITE);
   }
 }
@@ -267,7 +266,11 @@ void update_display()
  */
 void eeprom_save()
 {
-  EEPROM.put(0, settings);
+#ifndef DEMO
+  if (is_initialized) {
+    EEPROM.put(0, settings);
+  }
+#endif
 }
 
 /**
@@ -289,7 +292,7 @@ void eeprom_read()
 /**
  * Set relay state of the given pin
  */
-void toggle_relay(t_smallint pin, t_smallint state)
+void toggle_relay(uint8_t pin, uint8_t state)
 {
   digitalWrite(pin, state);
 }
@@ -297,7 +300,7 @@ void toggle_relay(t_smallint pin, t_smallint state)
 /**
  * Switch input from 'settings.selected_input' to 'input'
  */
-void switch_input(t_smallint input, t_smallint old_input)
+void switch_input(uint8_t input, uint8_t old_input)
 {
   // Disable output
   if (!settings.muted)
@@ -429,7 +432,7 @@ void select_prev_input()
  */
 void check_buttons()
 {
-  for (t_smallint i = 0; i < number_of_buttons; i++)
+  for (uint8_t i = 0; i < number_of_buttons; i++)
   {
     buttons[i].check();
   }
@@ -437,28 +440,24 @@ void check_buttons()
 
 void demo_mode()
 {
-  auto val = random(1, 50);
+  auto btn = random(number_of_buttons);
+#ifdef DEBUG
+  Serial.print("Random button #");
+  Serial.println(btn);
+#endif
 
-  if ((!settings.muted && val < 40) || (settings.muted && val < 25))
-  {
-    select_next_input();
-  }
-  else
-  {
-    toggle_mute();
-  }
+  buttons[btn].trigger();
+
 }
-
-unsigned long last_demo_millis = 0;
 
 void loop()
 {
+#ifndef DEMO
   if (is_active && (millis() - last_active_millis) > INACTIVITY_TIMEOUT)
   {
     inactive();
   }
 
-#ifndef DEMO
   check_buttons();
 #endif
 
